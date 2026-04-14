@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3 Day Menu Maker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Manrope:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-card">
+        <p class="eyebrow">Your Personal Recipe Planner</p>
+        <div class="hero-row">
+          <div>
+            <h1>Goofy Menu Maker</h1>
+            <p class="hero-copy">
+              What will Goofy cook for GoofGoof over the next three days? Add your favorite recipes and let the magic happen!
+            </p>
+          </div>
+          <button id="make-menu-button" class="primary-button" type="button">
+            Make 3 Day Menu
+          </button>
+        </div>
+        <p id="storage-status" class="storage-status">
+          Loading recipe storage...
+        </p>
+      </section>
+
+      <section class="layout-grid">
+        <article class="panel menu-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Generated Plan</p>
+              <h2>Your 3 Day Menu</h2>
+            </div>
+          </div>
+
+          <div id="week-menu" class="week-menu">
+            <p class="empty-state">
+              Click <strong>Make 3 Day Menu</strong> to randomize recipes for the
+              next three days.
+            </p>
+          </div>
+        </article>
+        
+           <section class="grocery-section">
+        <article class="panel grocery-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Shopping Prep</p>
+              <h2>Grocery List</h2>
+            </div>
+          </div>
+
+          <div class="saved-recipes-header">
+            <h3>Checklist</h3>
+            <span id="grocery-count" class="badge">0 items</span>
+          </div>
+
+          <div id="grocery-list" class="grocery-list">
+            <p class="empty-state">
+              Your grocery list will appear here after the 3 day menu is generated.
+            </p>
+          </div>
+        </article>
+      </section>
+        <article class="panel recipe-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">Recipe List</p>
+              <h2>Add a Recipe</h2>
+            </div>
+          </div>
+
+          <form id="recipe-form" class="recipe-form">
+            <label class="field">
+              <span>Recipe name</span>
+              <input
+                id="recipe-name"
+                name="recipeName"
+                type="text"
+                placeholder="Example: Creamy Tomato Pasta"
+                required
+              />
+            </label>
+
+            <label class="field">
+              <span>Ingredients</span>
+              <textarea
+                id="recipe-ingredients"
+                name="recipeIngredients"
+                rows="5"
+                placeholder="Add ingredients separated by commas or new lines"
+                required
+              ></textarea>
+            </label>
+
+            <button class="secondary-button" type="submit">Add Recipe</button>
+          </form>
+
+          <div class="saved-recipes">
+            <div class="saved-recipes-header">
+              <h3>Saved Recipes</h3>
+              <span id="recipe-count" class="badge">0 recipes</span>
+            </div>
+            <div id="recipe-list" class="recipe-list">
+              <p class="empty-state">No recipes yet. Add your first one above.</p>
+            </div>
+          </div>
+        </article>
+
+        
+      </section>
+   
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
