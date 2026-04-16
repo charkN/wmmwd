@@ -72,14 +72,32 @@
             </div>
           </div>
 
-          <div class="saved-recipes-header">
-            <h3>Checklist</h3>
-            <span id="grocery-count" class="badge">0 items</span>
-          </div>
+	          <div class="saved-recipes-header">
+	            <h3>Checklist</h3>
+	            <span id="grocery-count" class="badge">0 items</span>
+	          </div>
 
-          <div id="grocery-list" class="grocery-list">
-            <p class="empty-state">
-              Your grocery list will appear here after the 3 day menu is generated.
+	          <div id="grocery-recipe-filters" class="grocery-filters">
+	            <p class="empty-state">Pick recipes to include after you make a menu.</p>
+	          </div>
+
+	          <form id="grocery-item-form" class="grocery-item-form">
+	            <label class="field">
+	              <span>Add your own item</span>
+	              <input
+	                id="grocery-item-name"
+	                name="groceryItemName"
+	                type="text"
+	                placeholder="Example: Dish soap"
+	                required
+	              />
+	            </label>
+	            <button class="secondary-button" type="submit">Add Item</button>
+	          </form>
+
+	          <div id="grocery-list" class="grocery-list">
+	            <p class="empty-state">
+	              Your grocery list will appear here after the 3 day menu is generated.
             </p>
           </div>
         </article>
