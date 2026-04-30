@@ -34,12 +34,16 @@ create table if not exists public.recipes (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   ingredients text[] not null default '{}',
+  source_url text,
+  source_provider text,
+  source_caption text,
   created_at timestamptz not null default now()
 );
 
 create table if not exists public.week_menu_state (
   singleton_key text primary key,
   recipe_ids text[] not null default '{}',
+  included_grocery_recipe_ids text[] not null default '{}',
   updated_at timestamptz not null default now()
 );
 
@@ -49,8 +53,28 @@ create table if not exists public.grocery_checklist_items (
   ingredient_name text not null,
   item_count integer not null default 1,
   checked boolean not null default false,
+  source_type text not null default 'generated',
+  source_recipe_id text,
+  source_recipe_name text,
   updated_at timestamptz not null default now()
 );
+```
+
+If you already created the tables earlier, run this migration too:
+
+```sql
+alter table public.week_menu_state
+add column if not exists included_grocery_recipe_ids text[] not null default '{}';
+
+alter table public.recipes
+add column if not exists source_url text,
+add column if not exists source_provider text,
+add column if not exists source_caption text;
+
+alter table public.grocery_checklist_items
+add column if not exists source_type text not null default 'generated',
+add column if not exists source_recipe_id text,
+add column if not exists source_recipe_name text;
 ```
 
 ### 3. Allow the app to read and write recipes
@@ -79,6 +103,13 @@ on public.recipes
 for delete
 to anon
 using (true);
+
+create policy "Public can update recipes"
+on public.recipes
+for update
+to anon
+using (true)
+with check (true);
 
 alter table public.week_menu_state enable row level security;
 
@@ -155,6 +186,16 @@ window.WEEK_MENU_SUPABASE_CONFIG = {
 };
 ```
 
+Optional: Instagram previews need Meta oEmbed access. The importer still works without this if you paste the caption yourself.
+
+```js
+window.WEEK_MENU_SUPABASE_CONFIG = {
+  supabaseUrl: "YOUR_PROJECT_URL",
+  supabaseAnonKey: "YOUR_ANON_KEY",
+  instagramOembedAccessToken: "YOUR_META_OEMBED_ACCESS_TOKEN",
+};
+```
+
 ### 6. Publish your updated files to GitHub Pages
 
 Make sure these files are in your repo:
@@ -169,6 +210,7 @@ After you push the changes, GitHub Pages will rebuild the site automatically.
 ## How it behaves
 
 - if Supabase is configured correctly, recipes are stored online and synced
+- Instagram/TikTok imports create a draft from a pasted caption or transcript; TikTok previews may load directly, while Instagram previews need an oEmbed token
 - the current generated week menu and grocery checklist can also sync through Supabase
 - if Supabase is not configured yet, the app falls back to browser storage so it still works
 

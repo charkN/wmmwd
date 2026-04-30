@@ -28,6 +28,12 @@
   <body>
     <main class="app-shell">
       <section class="hero-card">
+        <img
+          class="decor-asset hero-decor"
+          src="2x/Asset%207@2x-8.png"
+          alt=""
+          aria-hidden="true"
+        />
         <p class="eyebrow">Your Personal Recipe Planner</p>
         <div class="hero-row">
           <div>
@@ -35,23 +41,64 @@
             <p class="hero-copy">
               What will Goofy cook for GoofGoof over the next three days? Add your favorite recipes and let the magic happen!
             </p>
-            <img src="goof.png" alt="goofies" width="200">
+            <img src="goof.png" alt="goofies" width="400">
           </div>
-          <button id="make-menu-button" class="primary-button" type="button">
-            Make Menu
-          </button>
         </div>
         <p id="storage-status" class="storage-status">
           Loading recipe storage...
         </p>
       </section>
 
+      <nav class="block-tabs" aria-label="Planner blocks">
+        <button
+          class="block-tab is-active"
+          type="button"
+          data-block-target="menu-panel"
+          aria-controls="menu-panel"
+          aria-selected="true"
+        >
+          Menu
+        </button>
+        <button
+          class="block-tab"
+          type="button"
+          data-block-target="grocery-panel"
+          aria-controls="grocery-panel"
+          aria-selected="false"
+        >
+          Groceries
+        </button>
+        <button
+          class="block-tab"
+          type="button"
+          data-block-target="recipe-panel"
+          aria-controls="recipe-panel"
+          aria-selected="false"
+        >
+          Recipes
+        </button>
+      </nav>
+
       <section class="layout-grid">
-        <article class="panel menu-panel">
+        <article id="menu-panel" class="panel menu-panel app-block is-active">
+          <img
+            class="decor-asset menu-decor"
+            src="2x/Asset%206@2x-8.png"
+            alt=""
+            aria-hidden="true"
+          />
           <div class="panel-heading">
             <div>
               <p class="panel-kicker">Generated Plan</p>
               <h2>What's cookin'?</h2>
+            </div>
+            <div class="menu-actions">
+              <button id="make-menu-button" class="primary-button" type="button">
+                Random Menu
+              </button>
+              <button id="choose-menu-button" class="secondary-button" type="button">
+                Choose Menu
+              </button>
             </div>
           </div>
 
@@ -64,20 +111,35 @@
         </article>
         
            <section class="grocery-section">
-        <article class="panel grocery-panel">
+        <article id="grocery-panel" class="panel grocery-panel app-block" hidden>
           <div class="panel-heading">
             <div>
               <p class="panel-kicker">Shopping Prep</p>
-              <h2>Lidl or Appie?</h2>
+              <h2>Shopping List</h2>
             </div>
           </div>
 
 	          <div class="saved-recipes-header">
 	            <h3>Checklist</h3>
-	            <span id="grocery-count" class="badge">0 items</span>
+              <div class="grocery-header-actions">
+                <button
+                  id="grocery-filter-toggle"
+                  class="icon-button"
+                  type="button"
+                  aria-label="Show recipe filters"
+                  aria-controls="grocery-recipe-filters"
+                  aria-expanded="false"
+                  title="Filter recipes"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                    <path d="M3 5h18l-7 8v5l-4 2v-7L3 5z" />
+                  </svg>
+                </button>
+                <span id="grocery-count" class="badge">0 items</span>
+              </div>
 	          </div>
 
-	          <div id="grocery-recipe-filters" class="grocery-filters">
+	          <div id="grocery-recipe-filters" class="grocery-filters" hidden>
 	            <p class="empty-state">Pick recipes to include after you make a menu.</p>
 	          </div>
 
@@ -102,13 +164,60 @@
           </div>
         </article>
       </section>
-        <article class="panel recipe-panel">
+        <article id="recipe-panel" class="panel recipe-panel app-block" hidden>
+          <img
+            class="decor-asset recipe-decor"
+            src="2x/Asset%205@2x-8.png"
+            alt=""
+            aria-hidden="true"
+          />
           <div class="panel-heading">
             <div>
               <p class="panel-kicker">Recipe List</p>
               <h2>What did goofy slay?</h2>
             </div>
           </div>
+
+          <section class="social-import">
+            <div class="saved-recipes-header">
+              <h3>Import from video</h3>
+              <span id="import-provider-badge" class="badge">Paste link</span>
+            </div>
+
+            <form id="social-import-form" class="social-import-form">
+              <label class="field">
+                <span>Instagram or TikTok link</span>
+                <input
+                  id="social-import-url"
+                  name="socialImportUrl"
+                  type="url"
+                  placeholder="https://www.instagram.com/reel/... or https://www.tiktok.com/@..."
+                  required
+                />
+              </label>
+
+              <label class="field">
+                <span>Caption, transcript, or notes</span>
+                <textarea
+                  id="social-import-caption"
+                  name="socialImportCaption"
+                  rows="5"
+                  placeholder="Paste the caption or any ingredients you can see/hear in the video"
+                ></textarea>
+              </label>
+
+              <div class="import-actions">
+                <button id="fetch-preview-button" class="ghost-button" type="button">
+                  Fetch Preview
+                </button>
+                <button class="secondary-button" type="submit">Extract Draft</button>
+              </div>
+            </form>
+
+            <div id="import-preview" class="import-preview" hidden></div>
+            <div id="import-status" class="import-status" role="status" aria-live="polite"></div>
+            <div id="import-draft" class="import-draft" hidden></div>
+          </section>
 
           <form id="recipe-form" class="recipe-form">
             <label class="field">
@@ -151,6 +260,29 @@
       </section>
    
     </main>
+
+    <div id="menu-chooser-modal" class="modal-backdrop" hidden>
+      <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="menu-chooser-title">
+        <div class="modal-header">
+          <div>
+            <p class="panel-kicker">Choose Menu</p>
+            <h2 id="menu-chooser-title">Pick recipes</h2>
+          </div>
+          <div class="menu-chooser-actions">
+            <button class="secondary-button" type="submit" form="menu-chooser-form">
+              Use Selected
+            </button>
+            <button id="close-menu-chooser-button" class="ghost-button" type="button">
+              Close
+            </button>
+          </div>
+        </div>
+        <form id="menu-chooser-form" class="menu-chooser-form">
+          <div id="menu-chooser-list" class="menu-chooser-list"></div>
+          <div id="menu-chooser-status" class="menu-chooser-status" role="status" aria-live="polite"></div>
+        </form>
+      </section>
+    </div>
 
     <script src="script.js"></script>
   </body>

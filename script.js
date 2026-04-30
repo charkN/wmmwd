@@ -3,14 +3,31 @@ const recipeNameInput = document.querySelector("#recipe-name");
 const recipeIngredientsInput = document.querySelector("#recipe-ingredients");
 const recipeList = document.querySelector("#recipe-list");
 const recipeCount = document.querySelector("#recipe-count");
+const socialImportForm = document.querySelector("#social-import-form");
+const socialImportUrlInput = document.querySelector("#social-import-url");
+const socialImportCaptionInput = document.querySelector("#social-import-caption");
+const fetchPreviewButton = document.querySelector("#fetch-preview-button");
+const importProviderBadge = document.querySelector("#import-provider-badge");
+const importPreview = document.querySelector("#import-preview");
+const importStatus = document.querySelector("#import-status");
+const importDraft = document.querySelector("#import-draft");
 const weekMenu = document.querySelector("#week-menu");
 const groceryRecipeFilters = document.querySelector("#grocery-recipe-filters");
+const groceryFilterToggle = document.querySelector("#grocery-filter-toggle");
 const groceryItemForm = document.querySelector("#grocery-item-form");
 const groceryItemNameInput = document.querySelector("#grocery-item-name");
 const groceryList = document.querySelector("#grocery-list");
 const groceryCount = document.querySelector("#grocery-count");
 const makeMenuButton = document.querySelector("#make-menu-button");
+const chooseMenuButton = document.querySelector("#choose-menu-button");
+const menuChooserModal = document.querySelector("#menu-chooser-modal");
+const menuChooserForm = document.querySelector("#menu-chooser-form");
+const menuChooserList = document.querySelector("#menu-chooser-list");
+const menuChooserStatus = document.querySelector("#menu-chooser-status");
+const closeMenuChooserButton = document.querySelector("#close-menu-chooser-button");
 const storageStatus = document.querySelector("#storage-status");
+const blockTabs = document.querySelectorAll("[data-block-target]");
+const appBlocks = document.querySelectorAll(".app-block");
 
 const storageKey = "week-menu-maker-recipes";
 const menuStorageKey = "week-menu-maker-current-menu";
@@ -61,6 +78,78 @@ let groceryItems = [];
 let editingRecipeId = null;
 let usesSupabaseForWeekMenu = Boolean(supabaseClient);
 let usesSupabaseForGroceries = Boolean(supabaseClient);
+let groceryFiltersOpen = false;
+let isMissingRecipeSourceColumns = false;
+
+function showAppBlock(blockId) {
+  appBlocks.forEach((block) => {
+    const isActive = block.id === blockId;
+    block.hidden = !isActive;
+    block.classList.toggle("is-active", isActive);
+  });
+
+  blockTabs.forEach((tab) => {
+    const isActive = tab.dataset.blockTarget === blockId;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-selected", String(isActive));
+  });
+}
+
+function renderMenuChooser() {
+  menuChooserStatus.textContent = "";
+
+  if (recipes.length === 0) {
+    menuChooserList.innerHTML =
+      '<p class="empty-state">Add recipes before choosing a menu.</p>';
+    return;
+  }
+
+  const selectedIds = new Set(currentMenuRecipeIds.map(String));
+
+  menuChooserList.innerHTML = recipes
+    .map(
+      (recipe) => `
+        <label class="menu-chooser-option">
+          <input
+            type="checkbox"
+            name="menuRecipe"
+            value="${escapeHtml(String(recipe.id))}"
+            ${selectedIds.has(String(recipe.id)) ? "checked" : ""}
+          />
+          <span>${escapeHtml(recipe.name)}</span>
+        </label>
+      `
+    )
+    .join("");
+}
+
+function openMenuChooser() {
+  renderMenuChooser();
+  syncMenuChooserLimit();
+  menuChooserModal.hidden = false;
+}
+
+function closeMenuChooser() {
+  menuChooserModal.hidden = true;
+}
+
+function syncMenuChooserLimit() {
+  const checkedInputs = [
+    ...menuChooserForm.querySelectorAll("input[name='menuRecipe']:checked"),
+  ];
+  const uncheckedInputs = [
+    ...menuChooserForm.querySelectorAll("input[name='menuRecipe']:not(:checked)"),
+  ];
+  const isAtLimit = checkedInputs.length >= menuDays.length;
+
+  uncheckedInputs.forEach((input) => {
+    input.disabled = isAtLimit;
+  });
+
+  menuChooserStatus.textContent = isAtLimit
+    ? `Maximum ${menuDays.length} recipes selected.`
+    : "";
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -76,10 +165,23 @@ function setStorageStatus(message, tone = "info") {
   storageStatus.dataset.tone = tone;
 }
 
+function setImportStatus(message, tone = "info") {
+  importStatus.textContent = message;
+  importStatus.dataset.tone = tone;
+}
+
 function updateSyncStatus() {
   if (!supabaseClient) {
     setStorageStatus(
       "Using browser storage. Add your Supabase keys to sync recipes and groceries across devices.",
+      "warning"
+    );
+    return;
+  }
+
+  if (isMissingRecipeSourceColumns) {
+    setStorageStatus(
+      "Recipes are syncing, but TikTok links are not because Supabase is missing the source_url/source_provider/source_caption columns. Run the README recipe migration.",
       "warning"
     );
     return;
@@ -199,6 +301,43 @@ function normalizeRecipe(record) {
     id: record.id,
     name: record.name,
     ingredients: Array.isArray(record.ingredients) ? record.ingredients : [],
+    sourceUrl: record.source_url ?? record.sourceUrl ?? "",
+    sourceProvider: record.source_provider ?? record.sourceProvider ?? "",
+    sourceCaption: record.source_caption ?? record.sourceCaption ?? "",
+  };
+}
+
+function getRecipeSignature(recipe) {
+  return [
+    recipe.name,
+    ...(Array.isArray(recipe.ingredients) ? recipe.ingredients : []),
+  ]
+    .map((value) => String(value).trim().toLowerCase())
+    .join("|");
+}
+
+function mergeRecipeSourceFromLocal(recipe, localRecipes) {
+  if (recipe.sourceUrl) {
+    return recipe;
+  }
+
+  const localMatch = localRecipes.find((localRecipe) => {
+    return (
+      localRecipe.sourceUrl &&
+      (String(localRecipe.id) === String(recipe.id) ||
+        getRecipeSignature(localRecipe) === getRecipeSignature(recipe))
+    );
+  });
+
+  if (!localMatch) {
+    return recipe;
+  }
+
+  return {
+    ...recipe,
+    sourceUrl: localMatch.sourceUrl,
+    sourceProvider: localMatch.sourceProvider,
+    sourceCaption: localMatch.sourceCaption,
   };
 }
 
@@ -256,7 +395,7 @@ async function loadRecipes() {
 
   const { data, error } = await supabaseClient
     .from("recipes")
-    .select("id, name, ingredients")
+    .select("*")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -268,7 +407,23 @@ async function loadRecipes() {
     return;
   }
 
-  recipes = data.map(normalizeRecipe);
+  const localRecipes = loadRecipesFromLocalStorage();
+  const hasSourceColumns =
+    data.length === 0 ||
+    data.some(
+      (record) =>
+        Object.prototype.hasOwnProperty.call(record, "source_url") ||
+        Object.prototype.hasOwnProperty.call(record, "source_provider") ||
+        Object.prototype.hasOwnProperty.call(record, "source_caption")
+    );
+  isMissingRecipeSourceColumns = !hasSourceColumns;
+
+  recipes = data
+    .map(normalizeRecipe)
+    .map((recipe) => mergeRecipeSourceFromLocal(recipe, localRecipes));
+  saveRecipesToLocalStorage();
+
+  updateSyncStatus();
 }
 
 async function loadWeekMenuState() {
@@ -401,11 +556,250 @@ async function saveGroceryItems() {
   }
 }
 
-function parseIngredients(rawIngredients) {
+const ingredientQuantityStartPattern =
+  "(?:\\d+(?:[./]\\d+)?|[\\u00bc\\u00bd\\u00be\\u2153\\u2154\\u215b\\u215c\\u215d\\u215e])";
+
+function splitIngredientText(rawIngredients) {
+  const quantityRegex = new RegExp(`(\\S)\\s+(?=${ingredientQuantityStartPattern})`, "gi");
+
   return rawIngredients
-    .split(/\n|,/)
-    .map((ingredient) => ingredient.trim())
+    .replace(/[\u2022\u00b7]/g, "\n")
+    .replace(/\s[-\u2013\u2014]\s/g, "\n")
+    .replace(quantityRegex, "$1\n")
+    .split(/\n|,|;/);
+}
+
+function parseIngredients(rawIngredients) {
+  return splitIngredientText(rawIngredients)
+    .map((ingredient) => normalizeIngredientText(ingredient))
     .filter(Boolean);
+}
+
+function getSocialProvider(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const host = parsedUrl.hostname.replace(/^www\./, "").toLowerCase();
+
+    if (host.includes("instagram.com")) {
+      return "Instagram";
+    }
+
+    if (host.includes("tiktok.com")) {
+      return "TikTok";
+    }
+
+    return "Video";
+  } catch {
+    return "Video";
+  }
+}
+
+function isAllowedSocialUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const host = parsedUrl.hostname.replace(/^www\./, "").toLowerCase();
+    const isSupportedHost = host === "instagram.com" ||
+      host.endsWith(".instagram.com") ||
+      host === "tiktok.com" ||
+      host.endsWith(".tiktok.com");
+
+    return ["http:", "https:"].includes(parsedUrl.protocol) && isSupportedHost;
+  } catch {
+    return false;
+  }
+}
+
+function updateImportProviderBadge() {
+  const provider = socialImportUrlInput.value.trim()
+    ? getSocialProvider(socialImportUrlInput.value.trim())
+    : "Paste link";
+  importProviderBadge.textContent = provider;
+}
+
+function cleanRecipeText(text) {
+  return text
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/#[\w-]+/g, " ")
+    .replace(/@\w+/g, " ")
+    .replace(/[\u2022\u00b7]/g, "\n")
+    .replace(/\s[-\u2013\u2014]\s/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+function titleFromCaption(caption, provider) {
+  const cleanedCaption = cleanRecipeText(caption);
+  const firstLine = cleanedCaption
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  if (!firstLine) {
+    return `${provider} Recipe Draft`;
+  }
+
+  return firstLine
+    .replace(/^(recipe|dinner|lunch|breakfast)\s*[:|-]\s*/i, "")
+    .split(/[.!?]/)[0]
+    .trim()
+    .slice(0, 80) || `${provider} Recipe Draft`;
+}
+
+function normalizeIngredientText(line) {
+  return line
+    .replace(/^[\s*_\-+•·]+/, "")
+    .replace(/^(?:\d+[.)]\s*)/, "")
+    .replace(/\*\*/g, "")
+    .replace(/[*_`~]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s:;,.|/\\-]+|[\s:;,.|/\\-]+$/g, "")
+    .trim();
+}
+
+function normalizeDraftIngredient(line) {
+  return normalizeIngredientText(
+    line.replace(/^(ingredients?|you need|what you need|for the)\s*[:|-]\s*/i, "")
+  );
+}
+
+function extractIngredientCandidates(caption) {
+  const cleanedCaption = cleanRecipeText(caption);
+  const lines = cleanedCaption
+    .split("\n")
+    .map((line) => normalizeDraftIngredient(line))
+    .filter(Boolean);
+  const ingredientHeadingIndex = lines.findIndex((line) =>
+    /^ingredients?$/i.test(line) || /^what you need$/i.test(line)
+  );
+  const stepHeadingIndex = lines.findIndex((line) =>
+    /^(method|steps|directions|instructions)$/i.test(line)
+  );
+
+  let candidateText = cleanedCaption;
+
+  if (ingredientHeadingIndex !== -1) {
+    const endIndex =
+      stepHeadingIndex > ingredientHeadingIndex ? stepHeadingIndex : lines.length;
+    candidateText = lines.slice(ingredientHeadingIndex + 1, endIndex).join("\n");
+  }
+
+  const splitCandidates = splitIngredientText(candidateText)
+    .map((item) => normalizeDraftIngredient(item))
+    .filter(Boolean)
+    .filter((item) => item.length <= 80)
+    .filter((item) => !/^(method|steps|directions|instructions|recipe)$/i.test(item))
+    .filter((item) => !/\b(follow|like|save|comment|share|subscribe|link in bio)\b/i.test(item));
+
+  return [...new Set(splitCandidates)].slice(0, 24);
+}
+
+function buildSocialRecipeDraft(url, caption) {
+  const provider = getSocialProvider(url);
+  const ingredients = extractIngredientCandidates(caption);
+
+  return {
+    id: crypto.randomUUID(),
+    name: titleFromCaption(caption, provider),
+    ingredients,
+    sourceUrl: url,
+    sourceProvider: provider,
+    sourceCaption: caption.trim(),
+  };
+}
+
+async function fetchSocialPreview(url) {
+  const provider = getSocialProvider(url);
+
+  if (provider === "TikTok") {
+    const response = await fetch(
+      `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`
+    );
+
+    if (!response.ok) {
+      throw new Error("TikTok preview was not available for this link.");
+    }
+
+    const data = await response.json();
+    return {
+      title: data.title || "TikTok video",
+      caption: data.title || "",
+      author: data.author_name || "TikTok",
+      thumbnailUrl: data.thumbnail_url || "",
+      provider,
+    };
+  }
+
+  if (provider === "Instagram" && supabaseConfig.instagramOembedAccessToken) {
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/instagram_oembed?url=${encodeURIComponent(
+        url
+      )}&access_token=${encodeURIComponent(supabaseConfig.instagramOembedAccessToken)}`
+    );
+
+    if (!response.ok) {
+      throw new Error("Instagram preview was not available for this link.");
+    }
+
+    const data = await response.json();
+    return {
+      title: data.title || "Instagram video",
+      caption: data.title || "",
+      author: data.author_name || "Instagram",
+      thumbnailUrl: data.thumbnail_url || "",
+      provider,
+    };
+  }
+
+  throw new Error(
+    provider === "Instagram"
+      ? "Instagram preview needs an oEmbed access token. You can still paste the caption and extract a recipe."
+      : "Preview is only available for Instagram or TikTok links."
+  );
+}
+
+function renderImportPreview(preview) {
+  importPreview.hidden = false;
+  importPreview.innerHTML = `
+    <div class="import-preview-card${preview.thumbnailUrl ? "" : " has-no-thumbnail"}">
+      ${
+        preview.thumbnailUrl
+          ? `<img src="${escapeHtml(preview.thumbnailUrl)}" alt="" />`
+          : ""
+      }
+      <div>
+        <h4>${escapeHtml(preview.title)}</h4>
+        <p>${escapeHtml(`${preview.provider} by ${preview.author}`)}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderImportDraft(draftRecipe) {
+  importDraft.hidden = false;
+  importDraft.innerHTML = `
+    <form class="import-draft-form" data-import-draft-id="${escapeHtml(draftRecipe.id)}">
+      <h4>Review draft</h4>
+      <label class="field">
+        <span>Recipe name</span>
+        <input name="recipeName" type="text" value="${escapeHtml(draftRecipe.name)}" required />
+      </label>
+      <label class="field">
+        <span>Ingredients</span>
+        <textarea name="recipeIngredients" rows="5" required>${escapeHtml(
+          draftRecipe.ingredients.join("\n")
+        )}</textarea>
+      </label>
+      <div class="import-draft-actions">
+        <button class="secondary-button" type="submit">Save Draft</button>
+        <button class="ghost-button" type="button" data-fill-manual-recipe>Move to Form</button>
+        <a class="ghost-button" href="${escapeHtml(draftRecipe.sourceUrl)}" target="_blank" rel="noreferrer">Open Source</a>
+      </div>
+    </form>
+  `;
+  importDraft.dataset.sourceUrl = draftRecipe.sourceUrl;
+  importDraft.dataset.sourceProvider = draftRecipe.sourceProvider;
+  importDraft.dataset.sourceCaption = draftRecipe.sourceCaption;
 }
 
 function shuffleRecipes(recipeArray) {
@@ -600,6 +994,11 @@ function renderRecipes() {
           <div class="recipe-card-header">
             <div>
               <h4>${escapeHtml(recipe.name)}</h4>
+              ${
+                recipe.sourceUrl
+                  ? `<a class="source-link" href="${escapeHtml(recipe.sourceUrl)}" target="_blank" rel="noreferrer">${escapeHtml(recipe.sourceProvider || "Source video")}</a>`
+                  : ""
+              }
             </div>
             <div>
               <button
@@ -700,6 +1099,15 @@ function renderGroceryRecipeFilters() {
   `;
 }
 
+function syncGroceryFilterVisibility() {
+  groceryRecipeFilters.hidden = !groceryFiltersOpen;
+  groceryFilterToggle.setAttribute("aria-expanded", String(groceryFiltersOpen));
+  groceryFilterToggle.setAttribute(
+    "aria-label",
+    groceryFiltersOpen ? "Hide recipe filters" : "Show recipe filters"
+  );
+}
+
 function renderGroceryList() {
   if (groceryItems.length === 0) {
     groceryList.innerHTML =
@@ -726,7 +1134,7 @@ function renderGroceryList() {
               ? `<button class="ghost-button grocery-remove-button" type="button" data-remove-grocery-key="${escapeHtml(
                   item.key
                 )}">Remove</button>`
-              : '<span class="grocery-item-tag">Recipe</span>'
+              : ""
           }
         </div>
       `
@@ -821,6 +1229,24 @@ async function buildWeekMenu() {
   await syncMenuAndGroceries(menuRecipes);
 }
 
+async function buildChosenMenu(recipeIds) {
+  const selectedRecipes = recipeIds
+    .map((recipeId) => recipes.find((recipe) => String(recipe.id) === String(recipeId)))
+    .filter(Boolean);
+
+  if (selectedRecipes.length === 0) {
+    weekMenu.innerHTML =
+      '<p class="empty-state">Choose at least one recipe to make a menu.</p>';
+    return;
+  }
+
+  const menuRecipes = menuDays.map((_, index) => {
+    return selectedRecipes[index % selectedRecipes.length];
+  });
+
+  await syncMenuAndGroceries(menuRecipes);
+}
+
 async function renderSavedMenuOrBuildOne() {
   const storedMenuRecipes = getMenuRecipesFromIds(currentMenuRecipeIds);
 
@@ -900,24 +1326,54 @@ async function addRecipe(recipe) {
     return;
   }
 
-  const { data, error } = await supabaseClient
+  const recipePayload = {
+    name: recipe.name,
+    ingredients: recipe.ingredients,
+    source_url: recipe.sourceUrl || null,
+    source_provider: recipe.sourceProvider || null,
+    source_caption: recipe.sourceCaption || null,
+  };
+
+  let { data, error } = await supabaseClient
     .from("recipes")
-    .insert({
-      name: recipe.name,
-      ingredients: recipe.ingredients,
-    })
-    .select("id, name, ingredients")
+    .insert(recipePayload)
+    .select("*")
     .single();
 
   if (error) {
+    const fallbackResponse = await supabaseClient
+      .from("recipes")
+      .insert({
+        name: recipe.name,
+        ingredients: recipe.ingredients,
+      })
+      .select("*")
+      .single();
+
+    data = fallbackResponse.data;
+    error = fallbackResponse.error;
+
+    if (error) {
+      setStorageStatus(
+        "Supabase save failed. Check your table setup in the README steps below.",
+        "error"
+      );
+      throw error;
+    }
+
+    isMissingRecipeSourceColumns = true;
     setStorageStatus(
-      "Supabase save failed. Check your table setup in the README steps below.",
-      "error"
+      "Recipe saved, but the TikTok link could not sync because Supabase is missing the source columns. Run the README recipe migration.",
+      "warning"
     );
-    throw error;
   }
 
-  upsertRecipeInState(data);
+  upsertRecipeInState({
+    ...data,
+    sourceUrl: data.source_url ?? recipe.sourceUrl ?? "",
+    sourceProvider: data.source_provider ?? recipe.sourceProvider ?? "",
+    sourceCaption: data.source_caption ?? recipe.sourceCaption ?? "",
+  });
 }
 
 async function updateRecipe(updatedRecipe) {
@@ -931,25 +1387,52 @@ async function updateRecipe(updatedRecipe) {
   );
   const targetId = foundRecipe ? foundRecipe.id : updatedRecipe.id;
 
-  const { data, error } = await supabaseClient
+  const recipePayload = {
+    name: updatedRecipe.name,
+    ingredients: updatedRecipe.ingredients,
+    source_url: updatedRecipe.sourceUrl || null,
+    source_provider: updatedRecipe.sourceProvider || null,
+    source_caption: updatedRecipe.sourceCaption || null,
+  };
+
+  let { data, error } = await supabaseClient
     .from("recipes")
-    .update({
-      name: updatedRecipe.name,
-      ingredients: updatedRecipe.ingredients,
-    })
+    .update(recipePayload)
     .eq("id", targetId)
-    .select("id, name, ingredients")
+    .select("*")
     .single();
 
   if (error) {
-    setStorageStatus(
-      "Supabase blocked recipe edits. Add an UPDATE policy for the recipes table, then try again.",
-      "error"
-    );
-    throw error;
+    const fallbackResponse = await supabaseClient
+      .from("recipes")
+      .update({
+        name: updatedRecipe.name,
+        ingredients: updatedRecipe.ingredients,
+      })
+      .eq("id", targetId)
+      .select("*")
+      .single();
+
+    data = fallbackResponse.data;
+    error = fallbackResponse.error;
+
+    if (error) {
+      setStorageStatus(
+        "Supabase blocked recipe edits. Add an UPDATE policy for the recipes table, then try again.",
+        "error"
+      );
+      throw error;
+    }
+
+    isMissingRecipeSourceColumns = true;
   }
 
-  upsertRecipeInState(data);
+  upsertRecipeInState({
+    ...data,
+    sourceUrl: data.source_url ?? updatedRecipe.sourceUrl ?? "",
+    sourceProvider: data.source_provider ?? updatedRecipe.sourceProvider ?? "",
+    sourceCaption: data.source_caption ?? updatedRecipe.sourceCaption ?? "",
+  });
   setStorageStatus("Recipe edits saved to Supabase.", "success");
 }
 
@@ -997,6 +1480,11 @@ async function submitEditedRecipeForm(form) {
     id: recipeId,
     name,
     ingredients,
+    sourceUrl: recipes.find((recipe) => String(recipe.id) === String(recipeId))?.sourceUrl ?? "",
+    sourceProvider:
+      recipes.find((recipe) => String(recipe.id) === String(recipeId))?.sourceProvider ?? "",
+    sourceCaption:
+      recipes.find((recipe) => String(recipe.id) === String(recipeId))?.sourceCaption ?? "",
   };
 
   await updateRecipe(updatedRecipe);
@@ -1009,6 +1497,129 @@ async function submitEditedRecipeForm(form) {
     await syncMenuAndGroceries(currentMenuRecipes);
   }
 }
+
+socialImportUrlInput.addEventListener("input", updateImportProviderBadge);
+
+fetchPreviewButton.addEventListener("click", async () => {
+  const url = socialImportUrlInput.value.trim();
+
+  if (!url) {
+    socialImportForm.reportValidity();
+    return;
+  }
+
+  if (!isAllowedSocialUrl(url)) {
+    setImportStatus("Use a full Instagram or TikTok video link.", "error");
+    return;
+  }
+
+  setImportStatus("Fetching preview...");
+
+  try {
+    const preview = await fetchSocialPreview(url);
+    renderImportPreview(preview);
+    if (!socialImportCaptionInput.value.trim() && preview.caption) {
+      socialImportCaptionInput.value = preview.caption;
+    }
+    setImportStatus("Preview fetched. Paste the caption or transcript, then extract a draft.", "success");
+  } catch (error) {
+    importPreview.hidden = true;
+    importPreview.innerHTML = "";
+    setImportStatus(error.message, "error");
+  }
+});
+
+socialImportForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const url = socialImportUrlInput.value.trim();
+  const caption = socialImportCaptionInput.value.trim();
+
+  if (!url || !caption || !isAllowedSocialUrl(url)) {
+    setImportStatus(
+      "Paste a full Instagram or TikTok link plus the caption, transcript, or visible ingredients.",
+      "error"
+    );
+    socialImportForm.reportValidity();
+    return;
+  }
+
+  const draftRecipe = buildSocialRecipeDraft(url, caption);
+
+  if (draftRecipe.ingredients.length === 0) {
+    setImportStatus(
+      "I could not find ingredients yet. Add the ingredient lines to the caption box and try again.",
+      "error"
+    );
+    return;
+  }
+
+  renderImportDraft(draftRecipe);
+  setImportStatus("Draft ready. Review it before saving.", "success");
+});
+
+importDraft.addEventListener("click", (event) => {
+  const fillButton = event.target.closest("[data-fill-manual-recipe]");
+
+  if (!fillButton) {
+    return;
+  }
+
+  const form = fillButton.closest("[data-import-draft-id]");
+  const nameInput = form?.querySelector("input[name='recipeName']");
+  const ingredientsInput = form?.querySelector("textarea[name='recipeIngredients']");
+
+  if (!nameInput || !ingredientsInput) {
+    return;
+  }
+
+  recipeNameInput.value = nameInput.value;
+  recipeIngredientsInput.value = ingredientsInput.value;
+  recipeNameInput.focus();
+});
+
+importDraft.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-import-draft-id]");
+
+  if (!form) {
+    return;
+  }
+
+  event.preventDefault();
+
+  const nameInput = form.querySelector("input[name='recipeName']");
+  const ingredientsInput = form.querySelector("textarea[name='recipeIngredients']");
+  const name = nameInput.value.trim();
+  const ingredients = parseIngredients(ingredientsInput.value);
+
+  if (!name || ingredients.length === 0) {
+    form.reportValidity();
+    return;
+  }
+
+  try {
+    await addRecipe({
+      id: form.dataset.importDraftId,
+      name,
+      ingredients,
+      sourceUrl: importDraft.dataset.sourceUrl ?? "",
+      sourceProvider: importDraft.dataset.sourceProvider ?? "",
+      sourceCaption: importDraft.dataset.sourceCaption ?? "",
+    });
+    renderRecipes();
+    await buildWeekMenu();
+    socialImportForm.reset();
+    importDraft.hidden = true;
+    importDraft.innerHTML = "";
+    importPreview.hidden = true;
+    importPreview.innerHTML = "";
+    updateImportProviderBadge();
+    setImportStatus("Recipe saved from video draft.", "success");
+  } catch (error) {
+    console.error(error);
+    setImportStatus("Could not save this draft yet. Check storage status above.", "error");
+  }
+});
 
 recipeForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1101,6 +1712,12 @@ recipeList.addEventListener("submit", async (event) => {
   }
 }, true);
 
+blockTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    showAppBlock(tab.dataset.blockTarget);
+  });
+});
+
 groceryList.addEventListener("change", async (event) => {
   const checkbox = event.target.closest("[data-grocery-key]");
 
@@ -1131,6 +1748,11 @@ groceryRecipeFilters.addEventListener("change", async (event) => {
   } catch (error) {
     console.error(error);
   }
+});
+
+groceryFilterToggle.addEventListener("click", () => {
+  groceryFiltersOpen = !groceryFiltersOpen;
+  syncGroceryFilterVisibility();
 });
 
 groceryItemForm.addEventListener("submit", async (event) => {
@@ -1201,6 +1823,48 @@ weekMenu.addEventListener("click", async (event) => {
 makeMenuButton.addEventListener("click", async () => {
   try {
     await buildWeekMenu();
+    showAppBlock("menu-panel");
+  } catch (error) {
+    console.error(error);
+  }
+});
+
+chooseMenuButton.addEventListener("click", () => {
+  openMenuChooser();
+});
+
+closeMenuChooserButton.addEventListener("click", () => {
+  closeMenuChooser();
+});
+
+menuChooserModal.addEventListener("click", (event) => {
+  if (event.target === menuChooserModal) {
+    closeMenuChooser();
+  }
+});
+
+menuChooserForm.addEventListener("change", (event) => {
+  if (event.target.matches("input[name='menuRecipe']")) {
+    syncMenuChooserLimit();
+  }
+});
+
+menuChooserForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const selectedRecipeIds = [
+    ...menuChooserForm.querySelectorAll("input[name='menuRecipe']:checked"),
+  ].map((input) => input.value);
+
+  if (selectedRecipeIds.length === 0) {
+    menuChooserStatus.textContent = "Choose at least one recipe.";
+    return;
+  }
+
+  try {
+    await buildChosenMenu(selectedRecipeIds);
+    closeMenuChooser();
+    showAppBlock("menu-panel");
   } catch (error) {
     console.error(error);
   }
@@ -1212,6 +1876,7 @@ async function initializeApp() {
   await loadGroceryItems();
   renderRecipes();
   renderGroceryRecipeFilters();
+  syncGroceryFilterVisibility();
   renderGroceryList();
   await renderSavedMenuOrBuildOne();
 }
